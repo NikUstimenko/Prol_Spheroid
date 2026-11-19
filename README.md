@@ -36,7 +36,7 @@ Both output files are written in `src/` with these commands. Close the
 reference plot to continue to the reconstruction. Set `N_WORKERS` near the
 top of either script to limit the number of parallel processes.
 
-Please cite the [original paper](https://doi.org/10.1016/j.jsv.2025.119227) when using the PSWF solver. For the benchmark,
+Please cite the [original paper](https://doi.org/10.1016/j.jsv.2025.119227) when using the PSWF solver. For the benchmark and the T-matrix reconstruction script,
 also cite the [*acoustotreams* manuscript](https://arxiv.org/abs/2606.22573).
 [Project license](LICENSE) · [Bundled Fortran license](src/license.txt)
 
