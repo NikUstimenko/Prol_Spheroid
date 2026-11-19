@@ -37,6 +37,7 @@ class ProlateSpheroid:
 
         self.solver = solver
         self.precision_fbs = settings.precision_fbs
+        self.n_extra = getattr(settings, "n_extra", 0)
 
     def run(self, ts_file_name):
         ParentDIR=os.path.split(os.getcwd())[0]
@@ -143,10 +144,26 @@ class ProlateSpheroid:
                 N_at_m0_for_hs = np.ceil(0.75 * hs + 12 - 7*np.sin(self.Theta_i_deg*np.pi/180))
 
             m = -1
-            if self.c_s < 500:
-                M_order = 0.5 * (self.c_s/self.c_w) * (np.sin(self.Theta_i_deg*np.pi/180)**3) *  hs  + 8
+            sin_theta_i = np.sin(self.Theta_i_deg * np.pi / 180)
+
+            # For incidence along the symmetry axis, only m = 0 is excited.
+            if np.isclose(sin_theta_i, 0.0, atol=1e-12):
+                M_order = 1
             else:
-                M_order = 0.3 * (self.c_s/self.c_w) * (np.sin(self.Theta_i_deg*np.pi/180)**3) *  hs  + 6
+                if self.c_s < 500:
+                    M_order = (
+                        0.5 * (self.c_s / self.c_w)
+                        * sin_theta_i**3
+                        * hs
+                        + 8
+                    )
+                else:
+                    M_order = (
+                        0.3 * (self.c_s / self.c_w)
+                        * sin_theta_i**3
+                        * hs
+                        + 6
+                    )
 
             M_order = int(np.ceil(M_order))
 
@@ -261,14 +278,30 @@ class ProlateSpheroid:
         N_at_m0_for_hs = np.ceil(0.75 * hs + 8 - 3*np.sin(self.Theta_i_deg*np.pi/180))
         if self.precision_fbs < 1e-5:
             N_at_m0_for_hs = np.ceil(0.75 * hs + 12 - 7*np.sin(self.Theta_i_deg*np.pi/180))
+        N_at_m0_for_hs += self.n_extra
 
-        if self.c_s < 500:
-            M_order = 0.5 * (self.c_s/self.c_w) * (np.sin(self.Theta_i_deg*np.pi/180)**3) *  hs  + 8
+        sin_theta_i = np.sin(self.Theta_i_deg * np.pi / 180)
+
+        # For incidence along the symmetry axis, only m = 0 is excited.
+        if np.isclose(sin_theta_i, 0.0, atol=1e-12):
+            M_order = 1
         else:
-            M_order = 0.3 * (self.c_s/self.c_w) * (np.sin(self.Theta_i_deg*np.pi/180)**3) *  hs  + 6
+            if self.c_s < 500:
+                M_order = (
+                    0.5 * (self.c_s / self.c_w)
+                    * sin_theta_i**3
+                    * hs
+                    + 8
+                )
+            else:
+                M_order = (
+                    0.3 * (self.c_s / self.c_w)
+                    * sin_theta_i**3
+                    * hs
+                    + 6
+                )
 
-        M_order = int(np.ceil(M_order))
-
+            M_order = int(np.ceil(M_order))
 
         M_order_Fortran = M_order
         N_order_Fortran = int(np.ceil(N_at_m0_for_hs))
@@ -332,8 +365,237 @@ class ProlateSpheroid:
 
             last_f_bs = pattern_m
 
-        return angles, np.absolute(pattern)
+        return angles, pattern
 
+
+
+    def compute_scattering_cross_section_gauss(self, freq_Hz, Nq, return_details=False):
+        """
+        Compute total scattering and extinction cross sections.
+
+        Scattering is integrated with Nq-point Gauss-Legendre quadrature
+        in mu = cos(theta). The azimuthal integral is performed analytically
+        using the repository's cos(m*phi) expansion.
+
+        Extinction is obtained from the complex forward scattering amplitude
+        with the acoustic optical theorem
+
+            sigma_ext = (4*pi/k) Im[f_forward].
+
+        The forward direction is the incident direction, i.e.
+        theta_s = Theta_i_deg and phi_s = 0.
+
+        Parameters
+        ----------
+        freq_Hz : float
+            Frequency in Hz.
+        Nq : int
+            Gauss-Legendre quadrature order.
+        return_details : bool
+            If True, also return diagnostic information.
+
+        Returns
+        -------
+        sigma_sca : float
+        sigma_ext : float
+        details : dict, optional
+        """
+        Nq = int(Nq)
+        if Nq < 1:
+            raise ValueError("Nq must be a positive integer.")
+
+        ParentDIR = os.path.split(os.getcwd())[0]
+
+        script_path1 = os.path.join(
+            ParentDIR, 'src', 'Run_param_fort_FromPython.py'
+        )
+        print(script_path1)
+        subprocess.run(
+            [sys.executable, script_path1],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        f = float(freq_Hz)
+        w = 2*np.pi*f
+        kw = w/self.c_w
+        ks = w/self.c_s
+        hw = self.d*kw/2
+        hs = self.d*ks/2
+
+        sin_theta_i = np.sin(self.Theta_i_deg*np.pi/180)
+
+        N_at_m0_for_hs = np.ceil(
+            0.75*hs + 8 - 3*sin_theta_i
+        )
+        if self.precision_fbs < 1e-5:
+            N_at_m0_for_hs = np.ceil(
+                0.75*hs + 12 - 7*sin_theta_i
+            )
+
+        n_extra = int(getattr(self, 'n_extra', 0))
+        N_at_m0_for_hs += n_extra
+
+        # For exactly axial incidence, only m=0 is excited.
+        if np.isclose(sin_theta_i, 0.0, atol=1e-14):
+            M_order = 1
+        else:
+            if self.c_s < 500:
+                M_order = (
+                    0.5*(self.c_s/self.c_w)
+                    * (sin_theta_i**3)*hs + 8
+                )
+            else:
+                M_order = (
+                    0.3*(self.c_s/self.c_w)
+                    * (sin_theta_i**3)*hs + 6
+                )
+            M_order = max(1, int(np.ceil(M_order)))
+
+        M_order_Fortran = M_order
+        N_order_Fortran = max(1, int(np.ceil(N_at_m0_for_hs)))
+
+        Theta_IncDeg = self.Theta_i_deg
+
+        # Interior spheroidal functions
+        write_Inputfile(
+            hs, self.AspRatio,
+            M_order_Fortran, N_order_Fortran,
+            Theta_IncDeg, ParentDIR,
+        )
+
+        script_path = os.path.join(
+            ParentDIR, 'src', 'Run_profcn_II_fort_FromPython.py'
+        )
+        print(script_path)
+        subprocess.run(
+            [sys.executable, script_path],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        content_Rad_SWF_hs = infunc_content_Rad_SWF(ParentDIR)
+        content_dr_values_hs = infunc_content_dr_values(ParentDIR)
+
+        # Exterior/background spheroidal functions
+        write_Inputfile(
+            hw, self.AspRatio,
+            M_order_Fortran, N_order_Fortran,
+            Theta_IncDeg, ParentDIR,
+        )
+        subprocess.run(
+            [sys.executable, script_path],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        content_Rad_SWF_hw = infunc_content_Rad_SWF(ParentDIR)
+        content_dr_values_hw = infunc_content_dr_values(ParentDIR)
+
+        # Gauss-Legendre nodes in mu = cos(theta)
+        mu_q, w_q = np.polynomial.legendre.leggauss(Nq)
+        theta_q_deg = np.degrees(np.arccos(mu_q))
+
+        # Append the forward direction to the evaluation list, so the
+        # expensive coefficient system for each m is solved only once.
+        theta_eval_deg = np.concatenate(
+            (theta_q_deg, [float(self.Theta_i_deg)])
+        )
+
+        sigma_sca = 0.0
+        f_forward = 0.0 + 0.0j
+        sigma_by_m = []
+        f_forward_by_m = []
+        N_by_m = []
+
+        for m in range(M_order_Fortran):
+            if hs > 60:
+                N_order = (
+                    N_at_m0_for_hs
+                    - 0.033*(m**2)
+                    - (80/N_at_m0_for_hs)*m
+                )
+            else:
+                N_order = N_at_m0_for_hs - m
+
+            N_order = max(1, int(np.ceil(N_order)))
+            N_by_m.append(N_order)
+
+            g_eval = calculate_fbs_at_angles(
+                theta_eval_deg,
+                content_Rad_SWF_hs,
+                content_dr_values_hs,
+                content_Rad_SWF_hw,
+                content_dr_values_hw,
+                self.Theta_i_deg,
+                m,
+                N_order_Fortran,
+                N_order,
+                self.solver,
+                self.ro_s,
+                self.ro_w,
+                kw,
+                cos_phi_m=1.0,
+            )
+
+            # First Nq values are the GL nodes; last value is forward.
+            g_m = g_eval[:-1]
+            fwd_m = g_eval[-1]
+
+            # Integral over phi using cosine-mode orthogonality.
+            phi_factor = 2*np.pi if m == 0 else np.pi
+            sigma_m = phi_factor*np.sum(
+                w_q*np.abs(g_m)**2
+            )
+            sigma_m = float(np.real(sigma_m))
+
+            sigma_by_m.append(sigma_m)
+            sigma_sca += sigma_m
+
+            # At forward scattering phi_s=0, so cos(m*phi_s)=1.
+            f_forward_by_m.append(fwd_m)
+            f_forward += fwd_m
+
+            print(
+                'm:', m, 'of', M_order_Fortran,
+                ', N:', N_order,
+                ', sigma_m:', '{:.12e}'.format(sigma_m)
+            )
+
+        sigma_sca = float(np.real(sigma_sca))
+
+        # Optical theorem for the complex far-field convention used here.
+        sigma_ext = float((4*np.pi/kw)*np.imag(f_forward))
+
+        if sigma_sca != 0.0:
+            optical_error = abs(sigma_ext - sigma_sca)/abs(sigma_sca)
+        else:
+            optical_error = np.nan
+
+        if return_details:
+            return sigma_sca, sigma_ext, {
+                'Nq': Nq,
+                'mu_q': mu_q,
+                'weights_q': w_q,
+                'theta_q_deg': theta_q_deg,
+                'M_order': M_order_Fortran,
+                'N_order_Fortran': N_order_Fortran,
+                'N_by_m': np.asarray(N_by_m, dtype=int),
+                'sigma_by_m': np.asarray(sigma_by_m, dtype=float),
+                'f_forward_by_m': np.asarray(
+                    f_forward_by_m,
+                    dtype=np.complex128,
+                ),
+                'f_forward': complex(f_forward),
+                'optical_error': float(optical_error),
+                'kw': kw,
+                'ks': ks,
+                'hw': hw,
+                'hs': hs,
+            }
+
+        return sigma_sca, sigma_ext
 
 def write_Inputfile(c_nondimensional,AspectRatio,M_order,N_order,Theta_IncDeg, _parent_dir):
     mmin=0   # minimum value for m. (integer)
@@ -664,6 +926,108 @@ def calculate_fbs(num_angles_per_half_plane, content_Rad_SWF_hs, content_dr_valu
         counter += 1
     return angles, pattern
 
+
+
+def calculate_fbs_at_angles(theta_deg, content_Rad_SWF_hs,
+                            content_dr_values_hs,
+                            content_Rad_SWF_hw,
+                            content_dr_values_hw,
+                            Theta_i_deg, m,
+                            N_order_Fortran, _N_order,
+                            solver, ro_s, ro_w, kw,
+                            cos_phi_m=1.0):
+    """Evaluate one azimuthal m-sector at arbitrary polar angles."""
+    theta_deg = np.asarray(theta_deg, dtype=float)
+
+    N_col_start = 0
+    N_col_end = _N_order
+    N_row_start = 0
+    N_row_end = _N_order
+
+    [C_Beta_D_Matrix_Arg,
+     C_Beta_D_Matrix_Exp,
+     C_Beta_F_Mat_Arg,
+     C_Beta_F_Mat_Exp,
+     _,
+     _] = func_Generate_Partition_Matrices(
+        content_Rad_SWF_hs,
+        content_dr_values_hs,
+        content_Rad_SWF_hw,
+        content_dr_values_hw,
+        Theta_i_deg,
+        m,
+        N_order_Fortran,
+        N_col_start,
+        N_col_end,
+        N_row_start,
+        N_row_end,
+        ro_s,
+        ro_w,
+    )
+
+    C_Beta_F_Vector_Arg = np.zeros(
+        (1, C_Beta_F_Mat_Arg.shape[1]), dtype='complex'
+    )
+    C_Beta_F_Vector_Exp = np.zeros(
+        (1, C_Beta_F_Mat_Arg.shape[1]), dtype='float'
+    )
+
+    for ss_col in range(C_Beta_F_Mat_Arg.shape[1]):
+        Summation_C_Beta_F = np.zeros(2, dtype='float')
+        for ss_row in range(C_Beta_F_Mat_Arg.shape[0]):
+            Summation_C_Beta_F = Sum_ArgExp(
+                Summation_C_Beta_F,
+                [C_Beta_F_Mat_Arg[ss_row][ss_col],
+                 C_Beta_F_Mat_Exp[ss_row][ss_col]],
+            )
+        C_Beta_F_Vector_Arg[0][ss_col] = Summation_C_Beta_F[0]
+        C_Beta_F_Vector_Exp[0][ss_col] = Summation_C_Beta_F[1]
+
+    amn = solve_amn(
+        C_Beta_D_Matrix_Arg,
+        C_Beta_D_Matrix_Exp,
+        C_Beta_F_Vector_Arg,
+        C_Beta_F_Vector_Exp,
+        solver,
+    )
+
+    Em = 1 if m == 0 else 2
+    eta_i = np.cos(np.pi*Theta_i_deg/180)
+    Em_x_Smn_hw_eta_i = []
+
+    for n in range(m + N_row_start, N_row_end + m):
+        dmn_r_hw_ArgExp = func_dr_values_ArgExp(
+            content_dr_values_hw, m, n, N_order_Fortran
+        )
+        Smn_hw_eta_i_arg_exp = func_Smn_eta_c_from_dr_ArgExp(
+            m, n, eta_i, dmn_r_hw_ArgExp
+        )
+        Smn_hw_eta_i = (
+            Smn_hw_eta_i_arg_exp[0]
+            * 10**Smn_hw_eta_i_arg_exp[1]
+        )
+        Em_x_Smn_hw_eta_i.append(Em*Smn_hw_eta_i)
+
+    Em_x_Smn_hw_eta_i = np.asarray(Em_x_Smn_hw_eta_i)
+    pattern_m = np.zeros(theta_deg.size, dtype=np.complex128)
+
+    for j, theta_s in enumerate(theta_deg):
+        vec = compute_pattern_vec(
+            amn,
+            float(theta_s),
+            content_dr_values_hw,
+            Em_x_Smn_hw_eta_i,
+            N_order_Fortran,
+            N_row_start,
+            N_row_end,
+            m,
+            cos_phi_m,
+        )
+        pattern_m[j] = (
+            (2/(1j*kw))*amn@np.transpose(vec)
+        )
+
+    return pattern_m
 
 def compute_pattern_vec(amn, theta_s, content_dr_values_hw, Em_x_Smn_hw_eta_i, N_order_Fortran, N_row_start, N_row_end, m, cos_phi_m):
     vec = np.zeros(N_row_end, dtype=np.complex128)
