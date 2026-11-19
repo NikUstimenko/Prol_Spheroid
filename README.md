@@ -1,5 +1,47 @@
 # High-Precision model and open-source software for acoustic backscattering by liquid- and gas-filled prolate spheroid across a wide frequency range and tilt angles: implications for fisheries acoustics
 
+## Prolate spheroid benchmark for acoustotreams
+
+This fork adds two parallel frequency sweeps for the prolate spheroid benchmark
+in the [*acoustotreams* manuscript](https://arxiv.org/abs/2606.22573) by Ustimenko and Rockstuhl (2026). They use the prolate spheroidal wave function (PSWF) solver developed by Khodabandeloo et al. (2025).
+[Upstream repository](https://github.com/CRIMAC-WP4-Machine-learning/Prol_Spheroid) ·
+[Original paper](https://doi.org/10.1016/j.jsv.2025.119227)
+
+| Script in `src/` | Calculation | Output |
+| --- | --- | --- |
+| `cross_section.py` | Direct PSWF solution for endfire incidence. Computes the scattering cross section by Gauss–Legendre quadrature and the extinction cross section from the forward amplitude using the acoustic optical theorem. | `spheroid_reference.npz` |
+| `reconstruct_tmatrix.py` | Reconstructs the spherical-wave T-matrix from PSWF solutions for several incident plane-wave directions. | `spheroid_pswf.hdf5` |
+
+Both scripts use semiaxes of 5, 5, and 7.5 mm and 11 frequencies from 10 to
+25 kHz. The NPZ file includes `frequency_hz`, `sigma_sca`, and `sigma_ext`,
+with cross sections in m<sup>2</sup>. In the HDF5 file, `tmatrix` is indexed by
+frequency, outgoing mode, and incoming mode. The `frequency` dataset is in Hz,
+and `modes/l` and `modes/m` give the spherical-wave indices. The default
+cutoff `l_max = 11` gives 144 modes per frequency.
+
+### Run the benchmark scripts
+
+Install GNU Fortran so that `gfortran` is available on `PATH`. From the
+repository root, run the following commands in your Python environment.
+
+```sh
+python -m pip install numpy scipy matplotlib h5py joblib
+gfortran --version
+cd src
+python cross_section.py
+python reconstruct_tmatrix.py
+```
+
+Both output files are written in `src/` with these commands. Close the
+reference plot to continue to the reconstruction. Set `N_WORKERS` near the
+top of either script to limit the number of parallel processes.
+
+Please cite the [original paper](https://doi.org/10.1016/j.jsv.2025.119227) when using the PSWF solver. For the benchmark,
+also cite the [*acoustotreams* manuscript](https://arxiv.org/abs/2606.22573).
+[Project license](LICENSE) · [Bundled Fortran license](src/license.txt)
+
+## Upstream solver documentation
+
 <b>Code for backscattering calculations of penetrable (gas or fluid) prolate spheroids 
 with high precision for a wide range of tilt angles and large frequency ranges used 
 in fisheries acoustics.</b>
